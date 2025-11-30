@@ -42,6 +42,7 @@ function App() {
   const [currentMode, setCurrentMode] = useState<AppMode>(AppMode.HOMEWORK);
   const [isRecording, setIsRecording] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   // Default language set to English as requested
   const [targetLang, setTargetLang] = useState<Language>(Language.ENGLISH);
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
@@ -77,9 +78,7 @@ function App() {
     setInputText('');
     setAttachedImage(null);
     setIsRecording(false);
-    if (audioSourceRef.current) {
-      audioSourceRef.current.stop();
-    }
+    stopAudio();
   }, [currentMode]);
 
   // Auto-scroll to bottom
@@ -102,6 +101,7 @@ function App() {
       recognitionRef.current?.stop();
       setIsRecording(false);
     } else {
+      stopAudio(); // Stop speaking if user wants to talk
       const recognition = new SpeechRecognition();
       recognition.continuous = false;
       recognition.interimResults = false;
@@ -121,35 +121,48 @@ function App() {
 
       recognition.onend = () => {
         setIsRecording(false);
-        // Automatically send if in Jarvis mode for fluid conversation
-        if (currentMode === AppMode.JARVIS) {
-           // Optional: Auto-send logic could go here
-        }
       };
 
       recognitionRef.current = recognition;
       recognition.start();
     }
-  }, [isRecording, currentMode]);
+  }, [isRecording]);
 
-  // Play Audio
+  // Audio Controls
+  const stopAudio = () => {
+    if (audioSourceRef.current) {
+      audioSourceRef.current.stop();
+      audioSourceRef.current = null;
+    }
+    setIsPlayingAudio(false);
+  };
+
   const playAudio = async (base64Audio: string) => {
     if (!audioContextRef.current) return;
     
-    // Stop current audio if playing
-    if (audioSourceRef.current) {
-      audioSourceRef.current.stop();
-    }
+    stopAudio();
 
     try {
       const audioBuffer = await decodeAudio(base64Audio, audioContextRef.current);
       const source = audioContextRef.current.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(audioContextRef.current.destination);
+      source.onended = () => setIsPlayingAudio(false);
       source.start(0);
       audioSourceRef.current = source;
+      setIsPlayingAudio(true);
     } catch (e) {
       console.error("Error playing audio", e);
+      setIsPlayingAudio(false);
+    }
+  };
+
+  const clearChat = () => {
+    if (confirm("Clear chat history for this mode?")) {
+      setHistories(prev => ({
+        ...prev,
+        [currentMode]: []
+      }));
     }
   };
 
@@ -157,6 +170,7 @@ function App() {
   const handleSendMessage = async () => {
     if ((!inputText.trim() && !attachedImage) || isLoading) return;
 
+    stopAudio(); // Stop any previous audio
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -255,9 +269,17 @@ function App() {
               </p>
             </div>
           </div>
-          <button className="p-2 text-slate-400 hover:text-white">
-            <Icons.Menu size={20} />
-          </button>
+          
+          <div className="flex items-center gap-2">
+            {isPlayingAudio && (
+               <button onClick={stopAudio} className="p-2 text-red-400 hover:text-red-300 animate-pulse" title="Stop Speaking">
+                  <Icons.Stop size={20} />
+               </button>
+            )}
+            <button onClick={clearChat} className="p-2 text-slate-400 hover:text-white" title="Clear Chat">
+              <Icons.Trash size={20} />
+            </button>
+          </div>
         </div>
 
         {/* Mode Switcher */}
@@ -306,7 +328,7 @@ function App() {
         )}
         
         <div className="flex items-end gap-2">
-          {/* Scan/Attach Button - Shows Camera icon for Homework to imply scanning */}
+          {/* Scan/Attach Button - Forces Camera environment for Homework */}
           <button 
             onClick={() => fileInputRef.current?.click()}
             className="p-3 bg-slate-800 text-slate-400 rounded-full hover:bg-slate-700 hover:text-white transition-colors"
@@ -320,8 +342,8 @@ function App() {
             onChange={handleFileChange} 
             className="hidden" 
             accept="image/*"
-            // Adding capture attribute for mobile devices to prefer camera
-            // but keeping it loose to allow gallery selection if user cancels camera
+            // If in homework mode, prefer rear camera for "scanning" effect
+            capture={currentMode === AppMode.HOMEWORK ? "environment" : undefined}
           />
 
           {/* Text Input */}

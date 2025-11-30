@@ -12,7 +12,10 @@ import {
   Volume2,
   StopCircle,
   Menu,
-  Camera
+  Camera,
+  Copy,
+  Check,
+  Trash2
 } from 'lucide-react';
 
 export const Icons = {
@@ -27,5 +30,8 @@ export const Icons = {
   Speaker: Volume2,
   Stop: StopCircle,
   Menu: Menu,
-  Camera: Camera
+  Camera: Camera,
+  Copy: Copy,
+  Check: Check,
+  Trash: Trash2
 };
