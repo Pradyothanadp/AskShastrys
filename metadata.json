@@ -1,0 +1,7 @@
+{
+  "name": "AskShastry",
+  "description": "A powerful AI study companion for ICSE/CBSE students with homework help, document summarization, translation, and a voice-activated Jarvis persona.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
