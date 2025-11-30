@@ -1,16 +1,20 @@
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { AppMode, Message, Language } from './types';
 import { Icons } from './components/Icons';
 import ModeSelector from './components/ModeSelector';
 import ChatMessage from './components/ChatMessage';
+import AdBanner from './components/AdBanner';
+import SubscriptionModal from './components/SubscriptionModal';
 import { generateResponse, decodeAudio } from './services/geminiService';
 
 // Speech Recognition setup for browser
 const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
+// Daily Credit Configuration
+const DAILY_FREE_CREDITS = 5;
+
 function App() {
-  // Separate history for each mode ensures content doesn't leak between tabs
+  // Separate history for each mode
   const [histories, setHistories] = useState<Record<AppMode, Message[]>>({
     [AppMode.HOMEWORK]: [{
       id: 'welcome-hw',
@@ -43,9 +47,12 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  // Default language set to English as requested
   const [targetLang, setTargetLang] = useState<Language>(Language.ENGLISH);
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
+  
+  // Monetization State
+  const [credits, setCredits] = useState<number>(DAILY_FREE_CREDITS);
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
   
   // Audio Playback Refs
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -54,10 +61,46 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
 
-  // Helper to get current messages for the active tab
   const currentMessages = histories[currentMode];
 
-  // Helper to update current mode's history
+  // Initialize Credits and Audio
+  useEffect(() => {
+    // Check local storage for credits
+    const today = new Date().toLocaleDateString();
+    const lastUseDate = localStorage.getItem('askshastry_last_date');
+    const storedCredits = localStorage.getItem('askshastry_credits');
+
+    if (lastUseDate !== today) {
+      // Reset credits for a new day
+      setCredits(DAILY_FREE_CREDITS);
+      localStorage.setItem('askshastry_last_date', today);
+      localStorage.setItem('askshastry_credits', DAILY_FREE_CREDITS.toString());
+    } else if (storedCredits) {
+      setCredits(parseInt(storedCredits, 10));
+    }
+
+    audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    return () => {
+      audioContextRef.current?.close();
+    };
+  }, []);
+
+  const updateCredits = (newAmount: number) => {
+    setCredits(newAmount);
+    localStorage.setItem('askshastry_credits', newAmount.toString());
+  };
+
+  const handleWatchAd = () => {
+    // Simulate watching an ad
+    setShowSubscriptionModal(false);
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      updateCredits(credits + 1);
+      alert("Thank you! You earned +1 Credit.");
+    }, 2000);
+  };
+
   const updateCurrentHistory = (updateFn: (prev: Message[]) => Message[]) => {
     setHistories(prev => ({
       ...prev,
@@ -65,15 +108,6 @@ function App() {
     }));
   };
 
-  // Initialize AudioContext
-  useEffect(() => {
-    audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    return () => {
-      audioContextRef.current?.close();
-    };
-  }, []);
-
-  // Clear inputs when switching modes to keep pages separate
   useEffect(() => {
     setInputText('');
     setAttachedImage(null);
@@ -81,16 +115,10 @@ function App() {
     stopAudio();
   }, [currentMode]);
 
-  // Auto-scroll to bottom
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentMessages, currentMode]);
 
-  // Handle Speech Recognition
   const toggleRecording = useCallback(() => {
     if (!SpeechRecognition) {
       alert("Browser does not support Speech Recognition.");
@@ -101,11 +129,11 @@ function App() {
       recognitionRef.current?.stop();
       setIsRecording(false);
     } else {
-      stopAudio(); // Stop speaking if user wants to talk
+      stopAudio();
       const recognition = new SpeechRecognition();
       recognition.continuous = false;
       recognition.interimResults = false;
-      recognition.lang = 'en-IN'; // Indian English context
+      recognition.lang = 'en-IN';
 
       recognition.onstart = () => setIsRecording(true);
       
@@ -128,7 +156,6 @@ function App() {
     }
   }, [isRecording]);
 
-  // Audio Controls
   const stopAudio = () => {
     if (audioSourceRef.current) {
       audioSourceRef.current.stop();
@@ -139,9 +166,7 @@ function App() {
 
   const playAudio = async (base64Audio: string) => {
     if (!audioContextRef.current) return;
-    
     stopAudio();
-
     try {
       const audioBuffer = await decodeAudio(base64Audio, audioContextRef.current);
       const source = audioContextRef.current.createBufferSource();
@@ -166,11 +191,19 @@ function App() {
     }
   };
 
-  // Handle Send
   const handleSendMessage = async () => {
     if ((!inputText.trim() && !attachedImage) || isLoading) return;
 
-    stopAudio(); // Stop any previous audio
+    // Check Credits
+    if (credits <= 0) {
+      setShowSubscriptionModal(true);
+      return;
+    }
+
+    // Deduct Credit
+    updateCredits(credits - 1);
+
+    stopAudio();
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -183,7 +216,6 @@ function App() {
     setAttachedImage(null);
     setIsLoading(true);
 
-    // Placeholder for AI loading
     const loadingMsgId = (Date.now() + 1).toString();
     updateCurrentHistory(prev => [...prev, {
       id: loadingMsgId,
@@ -194,7 +226,6 @@ function App() {
     }]);
 
     try {
-      // Capture current mode state for the async call
       const activeMode = currentMode;
       const activeLang = targetLang;
 
@@ -205,7 +236,6 @@ function App() {
         activeMode === AppMode.TRANSLATE || activeMode === AppMode.HOMEWORK ? activeLang : undefined
       );
 
-      // Remove loading message and add real response
       setHistories(prev => ({
         ...prev,
         [activeMode]: prev[activeMode].filter(m => m.id !== loadingMsgId).concat({
@@ -217,7 +247,6 @@ function App() {
         })
       }));
 
-      // Auto-play audio in Jarvis mode
       if (response.audioData && activeMode === AppMode.JARVIS) {
         await playAudio(response.audioData);
       }
@@ -237,7 +266,6 @@ function App() {
     }
   };
 
-  // Handle File Attachment
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -255,6 +283,12 @@ function App() {
   return (
     <div className="flex flex-col h-screen max-w-md mx-auto bg-slate-900 border-x border-slate-800 shadow-2xl relative overflow-hidden">
       
+      <SubscriptionModal 
+        isOpen={showSubscriptionModal} 
+        onClose={() => setShowSubscriptionModal(false)}
+        onWatchAd={handleWatchAd}
+      />
+
       {/* Header */}
       <header className="px-4 py-3 bg-slate-900/90 backdrop-blur-md sticky top-0 z-10 border-b border-slate-800">
         <div className="flex justify-between items-center mb-3">
@@ -264,9 +298,15 @@ function App() {
             </div>
             <div>
               <h1 className="text-lg font-bold text-slate-100 leading-tight">AskShastry</h1>
-              <p className="text-xs text-slate-400">
-                {currentMode === AppMode.JARVIS ? "Jarvis Activated" : "Student Assistant"}
-              </p>
+              <div className="flex items-center gap-2">
+                 <p className="text-xs text-slate-400">
+                    {currentMode === AppMode.JARVIS ? "Jarvis Mode" : "Student Assistant"}
+                 </p>
+                 {/* Credit Counter */}
+                 <div className={`text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-1 ${credits > 0 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>
+                    <span>⚡ {credits} Free</span>
+                 </div>
+              </div>
             </div>
           </div>
           
@@ -282,10 +322,8 @@ function App() {
           </div>
         </div>
 
-        {/* Mode Switcher */}
         <ModeSelector currentMode={currentMode} onSelectMode={setCurrentMode} />
         
-        {/* Language Selector (Visible in Homework & Translate) */}
         {(currentMode === AppMode.TRANSLATE || currentMode === AppMode.HOMEWORK) && (
           <div className="mt-2 animate-fade-in flex items-center gap-2">
              <span className="text-xs text-slate-400 whitespace-nowrap">Output Language:</span>
@@ -304,6 +342,9 @@ function App() {
 
       {/* Chat Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 relative">
+        {/* Ad Banner at top of chat */}
+        <AdBanner />
+
         {currentMessages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-slate-500 opacity-50">
             <Icons.Homework size={64} />
@@ -328,7 +369,6 @@ function App() {
         )}
         
         <div className="flex items-end gap-2">
-          {/* Scan/Attach Button - Forces Camera environment for Homework */}
           <button 
             onClick={() => fileInputRef.current?.click()}
             className="p-3 bg-slate-800 text-slate-400 rounded-full hover:bg-slate-700 hover:text-white transition-colors"
@@ -342,11 +382,9 @@ function App() {
             onChange={handleFileChange} 
             className="hidden" 
             accept="image/*"
-            // If in homework mode, prefer rear camera for "scanning" effect
             capture={currentMode === AppMode.HOMEWORK ? "environment" : undefined}
           />
 
-          {/* Text Input */}
           <div className="flex-1 bg-slate-800 rounded-2xl flex items-center border border-slate-700 focus-within:border-blue-500 transition-colors">
             <textarea
               value={inputText}
@@ -357,19 +395,19 @@ function App() {
                   handleSendMessage();
                 }
               }}
-              placeholder={currentMode === AppMode.JARVIS ? "Speak to Jarvis..." : "Type or scan question..."}
-              className="w-full bg-transparent text-slate-100 px-4 py-3 max-h-32 min-h-[48px] outline-none resize-none placeholder:text-slate-500 text-sm"
+              placeholder={credits > 0 ? (currentMode === AppMode.JARVIS ? "Speak to Jarvis..." : "Type or scan question...") : "Refill credits to continue..."}
+              disabled={credits <= 0}
+              className="w-full bg-transparent text-slate-100 px-4 py-3 max-h-32 min-h-[48px] outline-none resize-none placeholder:text-slate-500 text-sm disabled:opacity-50"
               rows={1}
             />
           </div>
 
-          {/* Mic / Send Button */}
           {inputText || attachedImage ? (
              <button 
                onClick={handleSendMessage}
-               disabled={isLoading}
+               disabled={isLoading || credits <= 0}
                className={`p-3 rounded-full text-white shadow-lg transform active:scale-95 transition-all
-                 ${isLoading ? 'bg-slate-600 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500'}
+                 ${(isLoading || credits <= 0) ? 'bg-slate-600 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500'}
                `}
              >
                <Icons.Send size={20} />
@@ -377,8 +415,9 @@ function App() {
           ) : (
              <button 
                onClick={toggleRecording}
+               disabled={credits <= 0}
                className={`p-3 rounded-full text-white shadow-lg transform active:scale-95 transition-all relative
-                 ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-700 hover:bg-slate-600'}
+                 ${credits <= 0 ? 'bg-slate-700 opacity-50 cursor-not-allowed' : (isRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-700 hover:bg-slate-600')}
                `}
              >
                <Icons.Mic size={20} />
@@ -389,7 +428,7 @@ function App() {
           )}
         </div>
         <p className="text-[10px] text-center text-slate-600 mt-2">
-           Powered by Gemini 2.5 • ICSE/CBSE/State Boards
+           Powered by Gemini 2.5 • Credits: {credits}/5
         </p>
       </div>
     </div>
